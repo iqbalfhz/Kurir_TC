@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
+import 'pages/delivery_page.dart';
+import 'pages/profile_page.dart';
 import 'services/theme_controller.dart';
+import 'pages/history_page.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final seed = Colors.indigo;
+    const seed = Colors.indigo;
 
     final light = ThemeData(
       brightness: Brightness.light,
@@ -42,11 +45,14 @@ class MyApp extends StatelessWidget {
           title: 'Starter Kit',
           theme: light,
           darkTheme: dark,
-          themeMode: mode, // dikontrol oleh toggle
+          themeMode: mode,
           home: const LoginPage(),
           routes: {
             '/login': (_) => const LoginPage(),
             '/home': (_) => const HomePage(),
+            '/delivery': (_) => const DeliveryPage(),
+            '/profile': (_) => const ProfilePage(),
+            '/history': (_) => const HistoryPage(),
           },
         );
       },
