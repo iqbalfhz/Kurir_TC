@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
-import '../services/storage_service.dart';
+import 'package:starter_kit/services/api_service.dart';
+import 'package:starter_kit/services/storage_service.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   final String email;

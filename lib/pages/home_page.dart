@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+
 import 'package:starter_kit/services/api_service.dart';
 import 'package:starter_kit/services/storage_service.dart';
+import 'package:starter_kit/models/dashboard.dart';
+import 'package:starter_kit/models/delivery.dart' as m;
 import 'package:starter_kit/models/user.dart';
 import 'package:starter_kit/widgets/app_shell.dart';
 
@@ -14,12 +18,51 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final ApiService _api;
   Future<User>? _meFuture;
+  Future<DashboardCounts>? _dashboardFuture;
+
+  // cached deliveries fetched from API so we can compute ranges
+  final List<m.Delivery> _allDeliveries = [];
+  // simple pagination state for lazy loading
+  int _currentPage = 1;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  late final ScrollController _scrollCtrl;
+  final _storage = StorageService();
+
+  // computed counts for each range
+  DashboardCounts _dailyCounts = DashboardCounts(
+    documents: 0,
+    done: 0,
+    inTransit: 0,
+  );
+  DashboardCounts _weeklyCounts = DashboardCounts(
+    documents: 0,
+    done: 0,
+    inTransit: 0,
+  );
+  DashboardCounts _monthlyCounts = DashboardCounts(
+    documents: 0,
+    done: 0,
+    inTransit: 0,
+  );
 
   @override
   void initState() {
     super.initState();
     _api = ApiService(StorageService());
     _meFuture = _api.me();
+    _dashboardFuture = _api.getDashboardCounts();
+    _scrollCtrl = ScrollController()..addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCachedThenRefresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _logout() async {
@@ -28,91 +71,19 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
   }
 
-  String _formatDate(DateTime date) {
-    const hari = [
-      'Minggu',
-      'Senin',
-      'Selasa',
-      'Rabu',
-      'Kamis',
-      'Jumat',
-      'Sabtu',
-    ];
-    const bulan = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'Mei',
-      'Jun',
-      'Jul',
-      'Agu',
-      'Sep',
-      'Okt',
-      'Nov',
-      'Des',
-    ];
-    return '${hari[date.weekday % 7]}, ${date.day} ${bulan[date.month - 1]} ${date.year}';
-  }
-
-  final List<_DeliveryItem> _todayDeliveries = [
-    _DeliveryItem(
-      'PT ABC Logistics',
-      'Jl. Sudirman No.12, Jakarta',
-      DeliveryStatus.inTransit,
-    ),
-    _DeliveryItem(
-      'Bank XYZ Tower',
-      'Jl. Gatot Subroto No.1, Jakarta',
-      DeliveryStatus.assigned,
-    ),
-    _DeliveryItem(
-      'Kantor KLM',
-      'Jl. Rasuna Said Blok X-5, Jakarta',
-      DeliveryStatus.done,
-    ),
-    _DeliveryItem(
-      'PT Maju Jaya',
-      'Jl. Thamrin No.45, Jakarta',
-      DeliveryStatus.assigned,
-    ),
-    _DeliveryItem(
-      'PT Sinar Abadi',
-      'Jl. Gajah Mada No.22, Jakarta',
-      DeliveryStatus.inTransit,
-    ),
-    _DeliveryItem(
-      'PT Bumi Raya',
-      'Jl. Ahmad Yani No.5, Bekasi',
-      DeliveryStatus.assigned,
-    ),
-    _DeliveryItem(
-      'CV Sentosa',
-      'Jl. Merdeka No.11, Tangerang',
-      DeliveryStatus.done,
-    ),
-    _DeliveryItem(
-      'PT Indo Cargo',
-      'Jl. Panjang No.88, Jakarta Barat',
-      DeliveryStatus.assigned,
-    ),
-    _DeliveryItem(
-      'PT Mandiri Logistik',
-      'Jl. Kemang Raya No.9, Jakarta Selatan',
-      DeliveryStatus.inTransit,
-    ),
-    _DeliveryItem(
-      'PT Global Express',
-      'Jl. Pemuda No.7, Depok',
-      DeliveryStatus.done,
-    ),
-  ];
+  // Deliveries will be loaded from backend (not limited to today)
+  final List<_DeliveryItem> _todayDeliveries = [];
 
   Future<void> _refresh() async {
     setState(() {
       _meFuture = _api.me();
+      _dashboardFuture = _api.getDashboardCounts();
     });
-    await _meFuture;
+    await Future.wait([
+      _meFuture ?? Future.value(),
+      _dashboardFuture ?? Future.value(),
+    ]);
+    await _loadPage(1, replace: true);
   }
 
   Future<void> _onAddPressed() async {
@@ -120,9 +91,303 @@ class _HomePageState extends State<HomePage> {
     if (result == true) await _refresh();
   }
 
+  DeliveryStatus _mapStatus(String status) {
+    final s = status.toLowerCase().trim();
+    if (s == '1' || s == 'assigned' || s == 'accepted' || s == 'diterima') {
+      return DeliveryStatus.assigned;
+    }
+    if (s == '2' ||
+        s == 'in_transit' ||
+        s == 'in-transit' ||
+        s == 'intransit' ||
+        s == 'in transit' ||
+        s == 'berjalan' ||
+        s == 'delivered' ||
+        s == 'on_the_way' ||
+        s == 'on the way') {
+      return DeliveryStatus.inTransit;
+    }
+    if (s == '3' ||
+        s == 'done' ||
+        s == 'completed' ||
+        s == 'selesai' ||
+        s == 'delivered') {
+      return DeliveryStatus.done;
+    }
+    return DeliveryStatus.inTransit;
+  }
+
+  /// Load cached deliveries (if present) so UI shows quickly, then refresh
+  /// page 1 from backend and enable lazy loading for subsequent pages.
+  Future<void> _loadCachedThenRefresh() async {
+    if (!mounted) return;
+    try {
+      final raw = await _storage.getCachedDeliveries();
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final parsed = jsonDecode(raw) as List<dynamic>;
+          final cached = parsed
+              .map((e) => m.Delivery.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+          _allDeliveries
+            ..clear()
+            ..addAll(cached);
+          _computeAllRangeCounts();
+          _updateTodayFromAll();
+        } catch (_) {
+          // ignore parsing errors and fall through to fresh fetch
+        }
+      }
+
+      // fetch first page fresh
+      await _loadPage(1, replace: true);
+    } finally {
+      // finished (no explicit loading flag maintained here)
+    }
+  }
+
+  Future<void> _loadPage(int page, {bool replace = false}) async {
+    if (!mounted) return;
+    if (_isLoadingMore) return;
+    _isLoadingMore = true;
+    try {
+      final list = await _api.getDeliveries(perPage: 50, page: page);
+      if (!mounted) return;
+
+      if (replace) {
+        _allDeliveries
+          ..clear()
+          ..addAll(list);
+      } else {
+        // append while avoiding duplicates
+        final existingIds = _allDeliveries.map((e) => e.id).toSet();
+        for (final d in list) {
+          if (!existingIds.contains(d.id)) _allDeliveries.add(d);
+        }
+      }
+
+      // update cache for page 1 only
+      if (page == 1) {
+        try {
+          final jsonList = list.map((d) {
+            return {
+              'id': d.id,
+              'sender_name': d.senderName,
+              'receiver_name': d.receiverName,
+              'address': d.address,
+              'status': d.status,
+              'photo_url': d.photoUrl,
+              'created_at': d.createdAt?.toIso8601String(),
+            };
+          }).toList();
+          await _storage.saveCachedDeliveries(jsonEncode(jsonList));
+        } catch (_) {}
+      }
+
+      // mark pagination end based on returned count
+      _hasMore = list.length >= 50;
+      _currentPage = page;
+
+      _computeAllRangeCounts();
+      _updateTodayFromAll();
+    } catch (_) {
+      // ignore for now
+    } finally {
+      _isLoadingMore = false;
+    }
+  }
+
+  void _onScroll() {
+    if (!_hasMore || _isLoadingMore) return;
+    if (!_scrollCtrl.hasClients) return;
+    final max = _scrollCtrl.position.maxScrollExtent;
+    final cur = _scrollCtrl.position.pixels;
+    if (max - cur < 300) {
+      // near bottom
+      _loadPage(_currentPage + 1);
+    }
+  }
+
+  void _updateTodayFromAll() {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 7));
+    final todayOnly = _allDeliveries.where((m.Delivery d) {
+      final created = d.createdAt;
+      if (created == null) return false;
+      final createdJakarta = created.toUtc().add(const Duration(hours: 7));
+      return createdJakarta.year == now.year &&
+          createdJakarta.month == now.month &&
+          createdJakarta.day == now.day;
+    }).toList();
+
+    final mapped = todayOnly
+        .map(
+          (m.Delivery d) => _DeliveryItem(
+            (d.receiverName.isNotEmpty) ? d.receiverName : d.senderName,
+            d.address,
+            _mapStatus(d.status),
+            d.status,
+            id: d.id,
+            photoUrl: d.photoUrl,
+          ),
+        )
+        .where(
+          (it) =>
+              it.status == DeliveryStatus.inTransit ||
+              it.status == DeliveryStatus.done,
+        )
+        .toList();
+
+    setState(() {
+      _todayDeliveries
+        ..clear()
+        ..addAll(mapped);
+
+      // today's counts are available via _dailyCounts/_todayDeliveries
+    });
+  }
+
+  void _computeAllRangeCounts() {
+    // Use Asia/Jakarta (UTC+7) as the reference "now" for all range
+    // computations so day/week/month boundaries match the backend.
+    final now = DateTime.now().toUtc().add(const Duration(hours: 7));
+
+    final dayStart = DateTime(now.year, now.month, now.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    final int daysToMonday = now.weekday - 1; // Mon=1
+    final weekStart = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: daysToMonday));
+    final weekEnd = weekStart.add(const Duration(days: 7));
+
+    final monthStart = DateTime(now.year, now.month, 1);
+    final monthEnd = (now.month < 12)
+        ? DateTime(now.year, now.month + 1, 1)
+        : DateTime(now.year + 1, 1, 1);
+
+    int dDocs = 0, dDone = 0, dIn = 0;
+    int wDocs = 0, wDone = 0, wIn = 0;
+    int mDocs = 0, mDone = 0, mIn = 0;
+
+    for (final d in _allDeliveries) {
+      final created = d.createdAt;
+      if (created == null) continue;
+
+      // convert delivery timestamp to Jakarta for consistent range checks
+      final createdJakarta = created.toUtc().add(const Duration(hours: 7));
+
+      final s = d.status.toLowerCase();
+      final isDone =
+          s == 'done' || s == 'completed' || s == 'selesai' || s == '3';
+      final isIn =
+          s == 'in_transit' ||
+          s == 'in-transit' ||
+          s == 'intransit' ||
+          s == 'in transit' ||
+          s == 'berjalan' ||
+          s == 'delivered' ||
+          s == '2';
+
+      if (createdJakarta.isBefore(dayStart) ||
+          !createdJakarta.isBefore(dayEnd)) {
+        // not in day
+      } else {
+        dDocs++;
+        if (isDone)
+          dDone++;
+        else if (isIn)
+          dIn++;
+      }
+      if (createdJakarta.isBefore(weekStart) ||
+          !createdJakarta.isBefore(weekEnd)) {
+        // not in week
+      } else {
+        wDocs++;
+        if (isDone)
+          wDone++;
+        else if (isIn)
+          wIn++;
+      }
+      if (createdJakarta.isBefore(monthStart) ||
+          !createdJakarta.isBefore(monthEnd)) {
+        // not in month
+      } else {
+        mDocs++;
+        if (isDone)
+          mDone++;
+        else if (isIn)
+          mIn++;
+      }
+    }
+
+    setState(() {
+      _dailyCounts = DashboardCounts(
+        documents: dDocs,
+        done: dDone,
+        inTransit: dIn,
+      );
+      _weeklyCounts = DashboardCounts(
+        documents: wDocs,
+        done: wDone,
+        inTransit: wIn,
+      );
+      _monthlyCounts = DashboardCounts(
+        documents: mDocs,
+        done: mDone,
+        inTransit: mIn,
+      );
+    });
+  }
+
+  Widget _buildRangeStatCards(ThemeData theme) {
+    return Row(
+      children: [
+        Expanded(
+          child: _StatCard(
+            title: 'Hari',
+            value: _dailyCounts.documents.toString(),
+            icon: Icons.assignment_outlined,
+            color: theme.colorScheme.primaryContainer,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _StatCard(
+            title: 'Minggu',
+            value: _weeklyCounts.documents.toString(),
+            icon: Icons.check_circle_outlined,
+            color: Colors.green.withOpacity(.15),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _StatCard(
+            title: 'Bulan',
+            value: _monthlyCounts.documents.toString(),
+            icon: Icons.local_shipping_outlined,
+            color: Colors.blue.withOpacity(.15),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // compute today's running/done list once so we can show an empty state
+    final running = _todayDeliveries
+        .where(
+          (d) =>
+              d.status == DeliveryStatus.inTransit ||
+              d.status == DeliveryStatus.done,
+        )
+        .toList();
+
+    // show three stat cards (Harian / Mingguan / Bulanan)
+    Widget summaryArea = _buildRangeStatCards(theme);
 
     return AppShell(
       currentIndex: 0,
@@ -144,7 +409,9 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _TodaySummary(items: _todayDeliveries),
+                    // Summary area: either backend dashboard (while loading) or
+                    // computed counts with a selector (Hari Ini / Minggu Ini / Bulan Ini)
+                    summaryArea,
                     const SizedBox(height: 12),
                     Text(
                       'Pengiriman Hari Ini',
@@ -155,34 +422,93 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final item = _todayDeliveries[index];
-                return Padding(
-                  padding: EdgeInsets.fromLTRB(16, index == 0 ? 0 : 8, 16, 8),
-                  child: _DeliveryCard(
-                    item: item,
-                    onDetail: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Buka detail: ${item.title}')),
-                      );
-                    },
-                    onDeliver: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Form bukti serah: ${item.title}'),
+            // only show deliveries that are 'Berjalan' (inTransit) or 'Selesai' (done)
+            if (running.isEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 36.0),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.inbox_outlined,
+                        size: 56,
+                        color: theme.iconTheme.color?.withOpacity(.6),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Belum ada pengiriman hari ini',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Tekan "Tambah Pengiriman" untuk menambahkan tugas baru.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.textTheme.bodyMedium?.color?.withOpacity(
+                            .7,
+                          ),
                         ),
-                      );
-                    },
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
-                );
-              }, childCount: _todayDeliveries.length),
-            ),
+                ),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final item = running[index];
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(16, index == 0 ? 0 : 8, 16, 8),
+                    child: _DeliveryCard(
+                      item: item,
+                      onDetail: () => _showDetail(context, item),
+                      onDeliver: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Form bukti serah: ${item.title}'),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                }, childCount: running.length),
+              ),
 
             const SliverToBoxAdapter(child: SizedBox(height: 96)),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showDetail(BuildContext context, _DeliveryItem item) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Detail'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (item.photoUrl != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Image.network(item.photoUrl!),
+                ),
+              Text('Penerima: ${item.title}'),
+              const SizedBox(height: 8),
+              Text('Alamat: ${item.address}'),
+              const SizedBox(height: 8),
+              Text('Status: ${item.rawStatus ?? item.status.toString()}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
       ),
     );
   }
@@ -365,63 +691,19 @@ class _ModernSliverAppBar extends StatelessWidget {
         },
       ),
       actions: [
-        IconButton(
-          tooltip: 'Notifikasi',
-          onPressed: () => ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Belum ada notifikasi'))),
-          icon: const Icon(Icons.notifications_none_rounded),
-        ),
+        // IconButton(
+        //   tooltip: 'Notifikasi',
+        //   onPressed: () => ScaffoldMessenger.of(
+        //     context,
+        //   ).showSnackBar(const SnackBar(content: Text('Belum ada notifikasi'))),
+        //   icon: const Icon(Icons.notifications_none_rounded),
+        // ),
         IconButton(
           tooltip: 'Logout',
           onPressed: onLogout,
           icon: const Icon(Icons.logout_rounded),
         ),
         const SizedBox(width: 4),
-      ],
-    );
-  }
-}
-
-class _TodaySummary extends StatelessWidget {
-  const _TodaySummary({required this.items});
-  final List<_DeliveryItem> items;
-
-  int get _done => items.where((e) => e.status == DeliveryStatus.done).length;
-  int get _inTransit =>
-      items.where((e) => e.status == DeliveryStatus.inTransit).length;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(
-          child: _StatCard(
-            title: 'Dokumen',
-            value: items.length.toString(),
-            icon: Icons.assignment_outlined,
-            color: theme.colorScheme.primaryContainer,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatCard(
-            title: 'Selesai',
-            value: _done.toString(),
-            icon: Icons.check_circle_outlined,
-            color: Colors.green.withOpacity(.15),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _StatCard(
-            title: 'Berjalan',
-            value: _inTransit.toString(),
-            icon: Icons.local_shipping_outlined,
-            color: Colors.blue.withOpacity(.15),
-          ),
-        ),
       ],
     );
   }
@@ -491,19 +773,41 @@ class _DeliveryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final statusChip = switch (item.status) {
-      DeliveryStatus.assigned => _buildChip(
-        context,
-        'Diterima',
-        theme.colorScheme.outline,
-      ),
-      DeliveryStatus.inTransit => _buildChip(
-        context,
-        'Dalam Perjalanan',
-        theme.colorScheme.primary,
-      ),
-      DeliveryStatus.done => _buildChip(context, 'Selesai', Colors.green),
+    // Prefer showing the raw status string from the backend (if available).
+    // Otherwise fall back to the localized labels.
+    final raw = (item.rawStatus ?? '').trim();
+    // Normalize common backend strings to localized labels.
+    final normalizedRaw = raw.isEmpty
+        ? ''
+        : switch (raw.toLowerCase()) {
+            'delivered' => 'Berjalan',
+            'selesai' => 'Selesai',
+            'done' => 'Selesai',
+            'in_transit' => 'Berjalan',
+            'in-transit' => 'Berjalan',
+            'intransit' => 'Berjalan',
+            'in transit' => 'Berjalan',
+            'berjalan' => 'Berjalan',
+            'assigned' => 'Diterima',
+            'accepted' => 'Diterima',
+            _ => raw,
+          };
+
+    final label = normalizedRaw.isNotEmpty
+        ? normalizedRaw
+        : switch (item.status) {
+            DeliveryStatus.assigned => 'Diterima',
+            DeliveryStatus.inTransit => 'Dalam Perjalanan',
+            DeliveryStatus.done => 'Selesai',
+          };
+
+    final color = switch (item.status) {
+      DeliveryStatus.assigned => theme.colorScheme.outline,
+      DeliveryStatus.inTransit => theme.colorScheme.primary,
+      DeliveryStatus.done => Colors.green,
     };
+
+    final statusChip = _buildChip(context, label, color);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -555,14 +859,14 @@ class _DeliveryCard extends StatelessWidget {
                     label: const Text('Detail'),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: onDeliver,
-                    icon: const Icon(Icons.delivery_dining_rounded),
-                    label: const Text('Serahkan'),
-                  ),
-                ),
+                // const SizedBox(width: 8),
+                // Expanded(
+                //   child: FilledButton.icon(
+                //     onPressed: onDeliver,
+                //     icon: const Icon(Icons.delivery_dining_rounded),
+                //     label: const Text('Serahkan'),
+                //   ),
+                // ),
               ],
             ),
           ],
@@ -595,7 +899,17 @@ class _DeliveryItem {
   final String title;
   final String address;
   final DeliveryStatus status;
-  const _DeliveryItem(this.title, this.address, this.status);
+  final String? rawStatus; // original status string from backend
+  final int? id;
+  final String? photoUrl;
+  const _DeliveryItem(
+    this.title,
+    this.address,
+    this.status,
+    this.rawStatus, {
+    this.id,
+    this.photoUrl,
+  });
 }
 
 enum DeliveryStatus { assigned, inTransit, done }

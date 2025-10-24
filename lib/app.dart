@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'pages/login_page.dart';
-import 'pages/home_page.dart';
-import 'pages/delivery_page.dart';
-import 'pages/profile_page.dart';
-import 'services/theme_controller.dart';
-import 'pages/history_page.dart';
+import 'package:starter_kit/pages/login_page.dart';
+import 'package:starter_kit/pages/home_page.dart';
+import 'package:starter_kit/pages/delivery_page.dart';
+import 'package:starter_kit/pages/profile_page.dart';
+import 'package:starter_kit/services/theme_controller.dart';
+import 'package:starter_kit/pages/history_page.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

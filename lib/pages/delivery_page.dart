@@ -2,11 +2,16 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:dio/dio.dart';
+import 'package:starter_kit/services/api_service.dart';
+import 'package:starter_kit/services/storage_service.dart';
+import 'package:starter_kit/models/delivery.dart';
+import 'package:starter_kit/models/user.dart';
 
 /// Halaman: Tambah Pengiriman (MVP)
-/// Dengan auto-kompres: simpan dua versi foto
-/// - Preview: untuk ditampilkan tajam di UI
-/// - Upload: untuk dikirim kecil ke server (hemat bandwidth)
+/// Dengan auto-kompres:
+/// - Preview (tajam untuk UI)
+/// - Upload (kecil untuk server)
 class DeliveryPage extends StatefulWidget {
   const DeliveryPage({super.key});
 
@@ -28,10 +33,6 @@ class _DeliveryPageState extends State<DeliveryPage> {
   Uint8List? _photoPreviewBytes; // untuk UI
   Uint8List? _photoUploadBytes; // untuk server
 
-  // Koordinat (opsional)
-  double? _lat;
-  double? _lng;
-
   bool _submitting = false;
 
   @override
@@ -41,6 +42,40 @@ class _DeliveryPageState extends State<DeliveryPage> {
     _addressCtrl.dispose();
     _noteCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-fill sender name from authenticated user if available.
+    _fillSenderFromAuth();
+  }
+
+  Future<void> _fillSenderFromAuth() async {
+    try {
+      final storage = StorageService();
+      final cached = await storage.getUserName();
+      if (!mounted) return;
+      if (cached != null && cached.trim().isNotEmpty) {
+        if (_senderCtrl.text.trim().isEmpty) {
+          setState(() => _senderCtrl.text = cached);
+        }
+        return;
+      }
+
+      final api = ApiService(storage);
+      final User user = await api.me();
+      if (!mounted) return;
+      if (_senderCtrl.text.trim().isEmpty) {
+        setState(() => _senderCtrl.text = user.name);
+      }
+      // cache for future loads
+      try {
+        await storage.saveUserName(user.name);
+      } catch (_) {}
+    } catch (_) {
+      // ignore — leave field empty if we can't fetch user
+    }
   }
 
   // ===== Kompresi Gambar =====
@@ -115,6 +150,9 @@ class _DeliveryPageState extends State<DeliveryPage> {
 
     // 2) Ambil file dari picker
     try {
+      // Capture platform/theme info before any awaits to avoid using
+      // BuildContext across async gaps (use_build_context_synchronously).
+      final preferWebp = Theme.of(context).platform == TargetPlatform.android;
       final XFile? img = await _picker.pickImage(
         source: source,
         imageQuality: 100, // ambil setinggi mungkin; kita kompres sendiri
@@ -123,8 +161,6 @@ class _DeliveryPageState extends State<DeliveryPage> {
 
       final original = await img.readAsBytes();
 
-      // 3) Kompres dua versi
-      final preferWebp = Theme.of(context).platform == TargetPlatform.android;
       final preview = await _compress(
         bytes: original,
         longSide: 1600,
@@ -150,15 +186,6 @@ class _DeliveryPageState extends State<DeliveryPage> {
     }
   }
 
-  Future<void> _pickLocation() async {
-    // TODO: Integrasi geolocator untuk ambil lokasi, lalu isi _lat/_lng atau alamat reverse-geocode.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Integrasikan geolocator untuk ambil lokasi.'),
-      ),
-    );
-  }
-
   String? _required(String? v) {
     if (v == null || v.trim().isEmpty) return 'Wajib diisi';
     return null;
@@ -168,36 +195,76 @@ class _DeliveryPageState extends State<DeliveryPage> {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
+    // Backend requires a photo on create; show a clear client-side message
+    // and do not attempt to submit if the user hasn't attached one.
     if (_photoUploadBytes == null) {
-      final sure = await showDialog<bool>(
+      await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Tanpa Foto Dokumen?'),
+          title: const Text('Foto Dokumen Diperlukan'),
           content: const Text(
-            'Kamu belum menambahkan foto dokumen. Lanjut tanpa foto?',
+            'Foto dokumen wajib diunggah saat menambahkan pengiriman. Silakan tambahkan foto terlebih dahulu.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Lanjut'),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Oke'),
             ),
           ],
         ),
       );
-      if (sure != true) return;
+      return;
     }
 
     setState(() => _submitting = true);
+    try {
+      final api = ApiService(StorageService());
+      final Delivery delivery = await api.createDelivery(
+        senderName: _senderCtrl.text.trim(),
+        receiverName: _recipientCtrl.text
+            .trim(), // pakai receiver_name sesuai BE
+        address: _addressCtrl.text.trim(),
+        note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+        photoBytes: _photoUploadBytes, // kirim hasil kompres jika ada
+        photoFilename: 'doc.jpg', // atau 'doc.webp' bila preferWebp
+        // Do not send status here; let the backend apply its default value.
+      );
 
-    // TODO: Simpan ke backend / local DB (Hive/SQLite) menggunakan _photoUploadBytes
-    await Future.delayed(const Duration(milliseconds: 400));
-
-    if (!mounted) return;
-    Navigator.pop(context, true); // kirim sinyal ke Home untuk refresh
+      if (!mounted) return;
+      // Log and show returned status for debugging (helps check backend behavior)
+      try {
+        // ignore: avoid_print
+        print('createDelivery response status: ${delivery.status}');
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Pengiriman dibuat (#${delivery.id}) — status: ${delivery.status}',
+          ),
+        ),
+      );
+      Navigator.pop(context, true); // biar Home bisa refresh
+    } catch (e) {
+      if (!mounted) return;
+      String msg;
+      if (e is DioException) {
+        final resp = e.response?.data;
+        if (resp is String) {
+          msg = resp;
+        } else if (resp is Map) {
+          msg = resp['message']?.toString() ?? resp.toString();
+        } else {
+          msg = e.message ?? e.toString();
+        }
+      } else {
+        msg = e.toString();
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Gagal menyimpan: $msg')));
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -220,11 +287,13 @@ class _DeliveryPageState extends State<DeliveryPage> {
               // Pengirim
               TextFormField(
                 controller: _senderCtrl,
+                readOnly: true,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
                   labelText: 'Nama Pengirim',
                   hintText: 'Contoh: Iqbal Fahrozi',
                   prefixIcon: Icon(Icons.person_outline),
+                  suffixText: 'Otomatis',
                 ),
                 validator: _required,
               ),
@@ -250,15 +319,10 @@ class _DeliveryPageState extends State<DeliveryPage> {
                 maxLines: 3,
                 keyboardType: TextInputType.streetAddress,
                 autofillHints: const [AutofillHints.fullStreetAddress],
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Alamat Tujuan',
                   hintText: 'Tulis alamat lengkap kantor klien',
-                  prefixIcon: const Icon(Icons.location_on_outlined),
-                  suffixIcon: IconButton(
-                    onPressed: _pickLocation,
-                    icon: const Icon(Icons.my_location_rounded),
-                    tooltip: 'Ambil lokasi',
-                  ),
+                  prefixIcon: Icon(Icons.location_on_outlined),
                 ),
                 validator: _required,
               ),
@@ -275,20 +339,6 @@ class _DeliveryPageState extends State<DeliveryPage> {
                   prefixIcon: Icon(Icons.sticky_note_2_outlined),
                 ),
               ),
-              const SizedBox(height: 24),
-
-              // Info koordinat kecil (opsional)
-              if (_lat != null && _lng != null)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer.withOpacity(.35),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'Koordinat: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}',
-                  ),
-                ),
             ],
           ),
         ),

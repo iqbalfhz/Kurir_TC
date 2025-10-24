@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../services/theme_controller.dart';
-import 'forgot_password_page.dart';
-import '../services/api_service.dart';
-import '../services/storage_service.dart';
+import 'package:starter_kit/services/theme_controller.dart';
+import 'package:starter_kit/pages/forgot_password_page.dart';
+import 'package:starter_kit/services/api_service.dart';
+import 'package:starter_kit/services/storage_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});

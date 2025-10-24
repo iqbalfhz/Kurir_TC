@@ -33,41 +33,9 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
   }
-
-  void _editName(User me) async {
-    final controller = TextEditingController(text: me.name);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ubah Nama'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'Nama lengkap',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Simpan'),
-          ),
-        ],
-      ),
-    );
-    if (result == null || result.isEmpty) return;
-
-    // TODO: panggil endpoint update profile kalau tersedia.
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Perubahan nama disimpan (MVP).')),
-    );
-    setState(() => _meFuture = _api.me()); // re-fetch
-  }
+  // Name editing is disabled in-app. Profile changes must be performed by
+  // an administrator or via the backend API. The inline edit flow was
+  // intentionally removed to avoid client-server state mismatch.
 
   void _changePassword() async {
     final formKey = GlobalKey<FormState>();
@@ -188,7 +156,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   avatarUrl: me.avatarUrl,
                 ),
                 const SizedBox(height: 16),
-                const _QuickStats(),
+                // const _QuickStats(),
                 const SizedBox(height: 16),
                 _SectionCard(
                   title: 'Akun',
@@ -197,8 +165,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       leading: const Icon(Icons.person_outline),
                       title: const Text('Nama'),
                       subtitle: Text(me.name),
-                      trailing: const Icon(Icons.edit_outlined),
-                      onTap: () => _editName(me),
+                      // Name is controlled by the backend/admin. Make it non-editable
+                      // in-app and show a lock icon to indicate this.
+                      trailing: const Icon(Icons.lock_outline),
                     ),
                     const Divider(height: 0),
                     ListTile(
@@ -377,40 +346,40 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-class _QuickStats extends StatelessWidget {
-  const _QuickStats({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: const [
-        Expanded(
-          child: _StatTile(
-            icon: Icons.check_circle_outline,
-            label: 'Selesai',
-            value: '24',
-          ),
-        ),
-        SizedBox(width: 10),
-        Expanded(
-          child: _StatTile(
-            icon: Icons.local_shipping_outlined,
-            label: 'Berjalan',
-            value: '5',
-          ),
-        ),
-        SizedBox(width: 10),
-        Expanded(
-          child: _StatTile(
-            icon: Icons.cancel_outlined,
-            label: 'Gagal',
-            value: '1',
-          ),
-        ),
-      ],
-    );
-  }
-}
+// class _QuickStats extends StatelessWidget {
+//   const _QuickStats({super.key});
+//   @override
+//   Widget build(BuildContext context) {
+//     final theme = Theme.of(context);
+//     return Row(
+//       children: const [
+//         Expanded(
+//           child: _StatTile(
+//             icon: Icons.check_circle_outline,
+//             label: 'Selesai',
+//             value: '24',
+//           ),
+//         ),
+//         SizedBox(width: 10),
+//         Expanded(
+//           child: _StatTile(
+//             icon: Icons.local_shipping_outlined,
+//             label: 'Berjalan',
+//             value: '5',
+//           ),
+//         ),
+//         SizedBox(width: 10),
+//         Expanded(
+//           child: _StatTile(
+//             icon: Icons.cancel_outlined,
+//             label: 'Gagal',
+//             value: '1',
+//           ),
+//         ),
+//       ],
+//     );
+//   }
+// }
 
 class _StatTile extends StatelessWidget {
   const _StatTile({

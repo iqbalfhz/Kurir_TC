@@ -1,4 +1,3 @@
-// lib/models/user.dart
 class User {
   final int id;
   final String name;

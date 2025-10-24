@@ -28,6 +28,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  http: ^1.1.0
+  http_parser: ^4.0.2
   flutter_image_compress: ^2.1.0
   image_picker: ^1.1.0
   dio: ^5.7.0

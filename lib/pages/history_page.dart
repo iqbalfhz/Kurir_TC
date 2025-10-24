@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:developer' as developer;
+import 'package:flutter/services.dart';
 import 'package:starter_kit/widgets/app_shell.dart';
+import 'package:starter_kit/services/api_service.dart';
+import 'package:starter_kit/services/storage_service.dart';
+import 'package:starter_kit/models/delivery.dart' as m;
 
 enum DeliveryStatus { assigned, inTransit, done }
 
@@ -15,63 +20,145 @@ class _HistoryPageState extends State<HistoryPage> {
   DeliveryStatus? _statusFilter; // null = semua
   DateTimeRange? _range;
   bool _loading = false;
+  // infinite scroll state
+  final ScrollController _scrollController = ScrollController();
+  int _page = 1;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  final List<_DeliveryHistoryItem> _all = [];
 
-  final List<_DeliveryHistoryItem> _all = [
-    _DeliveryHistoryItem(
-      title: 'PT ABC Logistics',
-      address: 'Jl. Sudirman No.12, Jakarta',
-      status: DeliveryStatus.inTransit,
-      time: DateTime.now().subtract(const Duration(hours: 2)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'Bank XYZ Tower',
-      address: 'Jl. Gatot Subroto No.1, Jakarta',
-      status: DeliveryStatus.assigned,
-      time: DateTime.now().subtract(const Duration(hours: 5)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'Kantor KLM',
-      address: 'Jl. Rasuna Said Blok X-5, Jakarta',
-      status: DeliveryStatus.done,
-      time: DateTime.now().subtract(const Duration(days: 1, hours: 3)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'PT Sinar Abadi',
-      address: 'Jl. Gajah Mada No.22, Jakarta',
-      status: DeliveryStatus.inTransit,
-      time: DateTime.now().subtract(const Duration(days: 1, hours: 7)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'PT Mandiri Logistik',
-      address: 'Jl. Kemang Raya No.9, Jaksel',
-      status: DeliveryStatus.done,
-      time: DateTime.now().subtract(const Duration(days: 2, hours: 1)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'PT Global Express',
-      address: 'Jl. Pemuda No.7, Depok',
-      status: DeliveryStatus.done,
-      time: DateTime.now().subtract(const Duration(days: 2, hours: 6)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'CV Sentosa',
-      address: 'Jl. Merdeka No.11, Tangerang',
-      status: DeliveryStatus.assigned,
-      time: DateTime.now().subtract(const Duration(days: 3, hours: 2)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'PT Indo Cargo',
-      address: 'Jl. Panjang No.88, Jakbar',
-      status: DeliveryStatus.assigned,
-      time: DateTime.now().subtract(const Duration(days: 4, hours: 4)),
-    ),
-    _DeliveryHistoryItem(
-      title: 'PT Bumi Raya',
-      address: 'Jl. Ahmad Yani No.5, Bekasi',
-      status: DeliveryStatus.done,
-      time: DateTime.now().subtract(const Duration(days: 5, hours: 8)),
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadHistory();
+    });
+    _scrollController.addListener(_onScroll);
+  }
+
+  DeliveryStatus _mapStatus(String status) {
+    final s = status.toLowerCase().trim();
+    // numeric codes sometimes used by backends
+    if (s == '1' || s == 'assigned' || s == 'accepted' || s == 'diterima') {
+      return DeliveryStatus.assigned;
+    }
+    if (s == '2' ||
+        s == 'in_transit' ||
+        s == 'in-transit' ||
+        s == 'intransit' ||
+        s == 'in transit' ||
+        s == 'berjalan' ||
+        s == 'on_the_way' ||
+        s == 'on_the_way') {
+      return DeliveryStatus.inTransit;
+    }
+    if (s == '3' || s == 'done' || s == 'completed' || s == 'selesai') {
+      return DeliveryStatus.done;
+    }
+    // default fallback
+    return DeliveryStatus.inTransit;
+  }
+
+  Future<void> _loadHistory() async {
+    // Initial load (page 1)
+    if (!mounted) return;
+    _page = 1;
+    _hasMore = true;
+    setState(() => _loading = true);
+    developer.log('Loading deliveries', name: 'HistoryPage');
+    try {
+      final api = ApiService(StorageService());
+      final list = await api.getDeliveries(page: 1);
+      final mapped = list.map((m.Delivery d) {
+        return _DeliveryHistoryItem(
+          id: d.id,
+          title: (d.receiverName.isNotEmpty) ? d.receiverName : d.senderName,
+          senderName: d.senderName,
+          address: d.address,
+          note: d.note,
+          photoUrl: d.photoUrl,
+          rawStatus: d.status,
+          status: _mapStatus(d.status),
+          time: d.createdAt ?? DateTime.now(),
+        );
+      }).toList();
+      if (!mounted) return;
+      setState(() {
+        _all
+          ..clear()
+          ..addAll(mapped);
+        // determine hasMore based on returned list length
+        _hasMore = list.length > 0 && list.length >= 1; // conservative
+        _page = 2;
+      });
+    } catch (e, st) {
+      developer.log(
+        'Error loading deliveries: $e',
+        name: 'HistoryPage',
+        error: e,
+        stackTrace: st,
+      );
+      if (mounted) {
+        try {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Gagal mengambil riwayat: ${e.toString()}')),
+          );
+        } catch (_) {
+          // ignore: avoid_print
+          developer.log('Failed to show snackbar', name: 'HistoryPage');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final threshold = 200.0;
+    if (_scrollController.position.pixels + threshold >=
+        _scrollController.position.maxScrollExtent) {
+      _loadPage();
+    }
+  }
+
+  Future<void> _loadPage() async {
+    if (_isLoadingMore || !_hasMore) return;
+    _isLoadingMore = true;
+    try {
+      final api = ApiService(StorageService());
+      final list = await api.getDeliveries(page: _page);
+      final mapped = list.map((m.Delivery d) {
+        return _DeliveryHistoryItem(
+          id: d.id,
+          title: (d.receiverName.isNotEmpty) ? d.receiverName : d.senderName,
+          senderName: d.senderName,
+          address: d.address,
+          note: d.note,
+          photoUrl: d.photoUrl,
+          rawStatus: d.status,
+          status: _mapStatus(d.status),
+          time: d.createdAt ?? DateTime.now(),
+        );
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        // dedupe by id
+        final existingIds = _all.map((e) => e.id).toSet();
+        for (final it in mapped) {
+          if (!existingIds.contains(it.id)) _all.add(it);
+        }
+        if (list.isEmpty) _hasMore = false;
+        _page++;
+      });
+    } catch (e) {
+      developer.log('Error loading page $_page: $e', name: 'HistoryPage');
+      // keep hasMore; user can retry by scrolling again
+    } finally {
+      _isLoadingMore = false;
+    }
+  }
 
   List<_DeliveryHistoryItem> get _filtered {
     final q = _searchCtrl.text.trim().toLowerCase();
@@ -81,10 +168,19 @@ class _HistoryPageState extends State<HistoryPage> {
           e.title.toLowerCase().contains(q) ||
           e.address.toLowerCase().contains(q);
       final matchStatus = _statusFilter == null || e.status == _statusFilter;
-      final matchRange =
-          _range == null ||
-          (e.time.isAfter(_range!.start.subtract(const Duration(seconds: 1))) &&
-              e.time.isBefore(_range!.end.add(const Duration(seconds: 1))));
+      // Compare using Asia/Jakarta timezone so the date-range filter matches
+      // the backend semantics.
+      final matchRange = () {
+        if (_range == null) return true;
+        final createdJakarta = _toJakarta(e.time);
+        final startJakarta = _jakartaDayStart(_range!.start);
+        // make end exclusive at next day start
+        final endJakarta = _jakartaDayStart(
+          _range!.end,
+        ).add(const Duration(days: 1));
+        return !createdJakarta.isBefore(startJakarta) &&
+            createdJakarta.isBefore(endJakarta);
+      }();
       return matchText && matchStatus && matchRange;
     }).toList()..sort((a, b) => b.time.compareTo(a.time));
   }
@@ -110,14 +206,13 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    setState(() => _loading = false);
+    await _loadHistory();
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -133,6 +228,92 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         title: const Text('Riwayat'),
         actions: [
+          // Debug: show raw JSON response
+          // // IconButton(
+          // //   tooltip: 'Show raw JSON',
+          // //   onPressed: () async {
+          // //     final api = ApiService(StorageService());
+          // //     String raw = '';
+          // //     try {
+          // //       raw = await api.getDeliveriesRaw();
+          // //     } catch (e) {
+          // //       raw = 'Error fetching raw: ${e.toString()}';
+          // //     }
+          // //     if (!mounted) return;
+          // //     await showDialog(
+          // //       context: context,
+          // //       builder: (ctx) => AlertDialog(
+          // //         title: const Text('Raw /deliveries response'),
+          // //         content: SingleChildScrollView(child: SelectableText(raw)),
+          // //         actions: [
+          // //           TextButton(
+          // //             onPressed: () {
+          // //               Navigator.pop(ctx);
+          // //             },
+          // //             child: const Text('Tutup'),
+          // //           ),
+          // //           TextButton(
+          // //             onPressed: () async {
+          // //               try {
+          // //                 await Clipboard.setData(ClipboardData(text: raw));
+          // //               } catch (_) {}
+          // //               Navigator.pop(ctx);
+          // //             },
+          // //             child: const Text('Copy'),
+          // //           ),
+          // //         ],
+          // //       ),
+          // //     );
+          // //   },
+          // //   icon: const Icon(Icons.bug_report_rounded),
+          // // ),
+          // // IconButton(
+          // //   tooltip: 'Muat semua',
+          // //   onPressed: () async {
+          // //     if (!mounted) return;
+          // //     setState(() => _loading = true);
+          // //     try {
+          // //       final api = ApiService(StorageService());
+          // //       final all = await api.getAllDeliveries(perPage: 50);
+          // //       if (!mounted) return;
+          // //       setState(() {
+          // //         _all
+          // //           ..clear()
+          // //           ..addAll(
+          // //             all.map(
+          // //               (d) => _DeliveryHistoryItem(
+          // //                 id: d.id,
+          // //                 title: (d.receiverName.isNotEmpty)
+          // //                     ? d.receiverName
+          // //                     : d.senderName,
+          // //                 senderName: d.senderName,
+          // //                 address: d.address,
+          // //                 note: d.note,
+          // //                 photoUrl: d.photoUrl,
+          // //                 rawStatus: d.status,
+          // //                 status: _mapStatus(d.status),
+          // //                 time: d.createdAt ?? DateTime.now(),
+          // //               ),
+          // //             ),
+          // //           );
+          // //       });
+          // //     } catch (e) {
+          // //       developer.log(
+          // //         'Error loading all deliveries: $e',
+          // //         name: 'HistoryPage',
+          // //       );
+          // //       if (mounted)
+          // //         ScaffoldMessenger.of(context).showSnackBar(
+          // //           SnackBar(
+          // //             content: Text('Gagal memuat semua: ${e.toString()}'),
+          // //           ),
+          // //         );
+          // //     } finally {
+          // //       if (mounted) setState(() => _loading = false);
+          // //     }
+          // //   },
+          // //   icon: const Icon(Icons.cloud_download_rounded),
+          // ),
           if (_range != null)
             IconButton(
               tooltip: 'Hapus filter tanggal',
@@ -150,6 +331,7 @@ class _HistoryPageState extends State<HistoryPage> {
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: CustomScrollView(
+          controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
@@ -161,11 +343,11 @@ class _HistoryPageState extends State<HistoryPage> {
                       controller: _searchCtrl,
                       onChanged: (_) => setState(() {}),
                     ),
-                    const SizedBox(height: 10),
-                    _StatusChips(
-                      current: _statusFilter,
-                      onChanged: (s) => setState(() => _statusFilter = s),
-                    ),
+                    // const SizedBox(height: 10),
+                    // _StatusChips(
+                    //   current: _statusFilter,
+                    //   onChanged: (s) => setState(() => _statusFilter = s),
+                    // ),
                     if (_range != null) ...[
                       const SizedBox(height: 8),
                       Align(
@@ -225,15 +407,63 @@ class _HistoryPageState extends State<HistoryPage> {
                       ),
                       child: _HistoryCard(
                         item: it,
-                        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Detail: ${it.title}')),
+                        onTap: () => showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: Text(it.title),
+                            content: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (it.photoUrl != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Image.network(it.photoUrl!),
+                                    ),
+                                  Text('Pengirim: ${it.senderName}'),
+                                  const SizedBox(height: 6),
+                                  Text('Alamat: ${it.address}'),
+                                  const SizedBox(height: 6),
+                                  if (it.note != null)
+                                    Text('Catatan: ${it.note}'),
+                                  const SizedBox(height: 6),
+                                  Text('Status (raw): ${it.rawStatus}'),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Waktu: ${_fmtDate(it.time)} ${_fmtTime(it.time)}',
+                                  ),
+                                ],
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Tutup'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
                   }, childCount: entry.value.length),
                 ),
               ],
-            const SliverToBoxAdapter(child: SizedBox(height: 96)),
+            // bottom spacing and loading indicator for pagination
+            SliverToBoxAdapter(
+              child: Column(
+                children: [
+                  const SizedBox(height: 16),
+                  if (_isLoadingMore)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  const SizedBox(height: 80),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -255,9 +485,11 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   String _dateLabel(DateTime d) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final that = DateTime(d.year, d.month, d.day);
+    // Use Asia/Jakarta for date grouping/labels so they match BE calendar days.
+    final nowJakarta = _toJakarta(DateTime.now());
+    final today = DateTime(nowJakarta.year, nowJakarta.month, nowJakarta.day);
+    final thatJakarta = _toJakarta(d);
+    final that = DateTime(thatJakarta.year, thatJakarta.month, thatJakarta.day);
     final diff = today.difference(that).inDays;
     if (diff == 0) return 'Hari ini';
     if (diff == 1) return 'Kemarin';
@@ -293,18 +525,43 @@ class _HistoryPageState extends State<HistoryPage> {
       'Nov',
       'Des',
     ];
-    return '${d.day} ${bulan[d.month - 1]} ${d.year}';
+    final j = _toJakarta(d);
+    return '${j.day} ${bulan[j.month - 1]} ${j.year}';
+  }
+
+  String _fmtTime(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final j = _toJakarta(d);
+    return '${two(j.hour)}:${two(j.minute)}';
+  }
+
+  // Convert any DateTime to Asia/Jakarta time for comparisons and display.
+  DateTime _toJakarta(DateTime d) => d.toUtc().add(const Duration(hours: 7));
+
+  DateTime _jakartaDayStart(DateTime d) {
+    final j = _toJakarta(d);
+    return DateTime(j.year, j.month, j.day);
   }
 }
 
 class _DeliveryHistoryItem {
+  final int id;
   final String title;
+  final String senderName;
   final String address;
+  final String? note;
+  final String? photoUrl;
+  final String rawStatus;
   final DeliveryStatus status;
   final DateTime time;
   const _DeliveryHistoryItem({
+    required this.id,
     required this.title,
+    required this.senderName,
     required this.address,
+    this.note,
+    this.photoUrl,
+    required this.rawStatus,
     required this.status,
     required this.time,
   });
@@ -340,53 +597,49 @@ class _SearchField extends StatelessWidget {
   }
 }
 
-class _StatusChips extends StatelessWidget {
-  const _StatusChips({required this.current, required this.onChanged});
-  final DeliveryStatus? current;
-  final ValueChanged<DeliveryStatus?> onChanged;
+// class _StatusChips extends StatelessWidget {
+//   const _StatusChips({required this.current, required this.onChanged});
+//   final DeliveryStatus? current;
+//   final ValueChanged<DeliveryStatus?> onChanged;
 
-  @override
-  Widget build(BuildContext context) {
-    Widget chip({
-      required String label,
-      required bool selected,
-      required VoidCallback? onTap,
-    }) {
-      return ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap?.call(),
-      );
-    }
+//   @override
+//   Widget build(BuildContext context) {
+//     Widget chip({
+//       required String label,
+//       required bool selected,
+//       required VoidCallback? onTap,
+//     }) {
+//       return ChoiceChip(
+//         label: Text(label),
+//         selected: selected,
+//         onSelected: (_) => onTap?.call(),
+//       );
+//     }
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        chip(
-          label: 'Semua',
-          selected: current == null,
-          onTap: () => onChanged(null),
-        ),
-        chip(
-          label: 'Diterima',
-          selected: current == DeliveryStatus.assigned,
-          onTap: () => onChanged(DeliveryStatus.assigned),
-        ),
-        chip(
-          label: 'Berjalan',
-          selected: current == DeliveryStatus.inTransit,
-          onTap: () => onChanged(DeliveryStatus.inTransit),
-        ),
-        chip(
-          label: 'Selesai',
-          selected: current == DeliveryStatus.done,
-          onTap: () => onChanged(DeliveryStatus.done),
-        ),
-      ],
-    );
-  }
-}
+//     return Wrap(
+//       spacing: 8,
+//       runSpacing: 8,
+//       children: [
+//         chip(
+//           label: 'Semua',
+//           selected: current == null,
+//           onTap: () => onChanged(null),
+//         ),
+//         // 'Diterima' removed per request
+//         chip(
+//           label: 'Berjalan',
+//           selected: current == DeliveryStatus.inTransit,
+//           onTap: () => onChanged(DeliveryStatus.inTransit),
+//         ),
+//         chip(
+//           label: 'Selesai',
+//           selected: current == DeliveryStatus.done,
+//           onTap: () => onChanged(DeliveryStatus.done),
+//         ),
+//       ],
+//     );
+//   }
+// }
 
 class _FilterPill extends StatelessWidget {
   const _FilterPill({required this.icon, required this.label, this.onClear});
@@ -476,22 +729,22 @@ class _HistoryCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(item.address, style: theme.textTheme.bodyMedium),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.access_time_rounded,
-                          size: 16,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _fmtTime(item.time),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
+                    // Row(
+                    //   children: [
+                    //     Icon(
+                    //       Icons.access_time_rounded,
+                    //       size: 16,
+                    //       color: theme.colorScheme.onSurfaceVariant,
+                    //     ),
+                    //     const SizedBox(width: 4),
+                    //     Text(
+                    //       _fmtTime(item.time),
+                    //       style: theme.textTheme.labelSmall?.copyWith(
+                    //         color: theme.colorScheme.onSurfaceVariant,
+                    //       ),
+                    //     ),
+                    //   ],
+                    // ),
                   ],
                 ),
               ),
