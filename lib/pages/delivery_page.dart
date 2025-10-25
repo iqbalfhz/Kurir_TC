@@ -376,7 +376,7 @@ class _PhotoBox extends StatelessWidget {
         height: 140,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: Theme.of(context).colorScheme.surfaceVariant,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           border: Border.all(color: theme.colorScheme.outline.withOpacity(.4)),
         ),
         alignment: Alignment.center,

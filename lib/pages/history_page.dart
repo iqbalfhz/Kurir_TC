@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:developer' as developer;
-import 'package:flutter/services.dart';
 import 'package:starter_kit/widgets/app_shell.dart';
 import 'package:starter_kit/services/api_service.dart';
 import 'package:starter_kit/services/storage_service.dart';
 import 'package:starter_kit/models/delivery.dart' as m;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 enum DeliveryStatus { assigned, inTransit, done }
 
@@ -88,7 +89,7 @@ class _HistoryPageState extends State<HistoryPage> {
           ..clear()
           ..addAll(mapped);
         // determine hasMore based on returned list length
-        _hasMore = list.length > 0 && list.length >= 1; // conservative
+        _hasMore = list.isNotEmpty && list.isNotEmpty; // conservative
         _page = 2;
       });
     } catch (e, st) {
@@ -228,45 +229,43 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         title: const Text('Riwayat'),
         actions: [
-          // Debug: show raw JSON response
-          // // IconButton(
-          // //   tooltip: 'Show raw JSON',
-          // //   onPressed: () async {
-          // //     final api = ApiService(StorageService());
-          // //     String raw = '';
-          // //     try {
-          // //       raw = await api.getDeliveriesRaw();
-          // //     } catch (e) {
-          // //       raw = 'Error fetching raw: ${e.toString()}';
-          // //     }
-          // //     if (!mounted) return;
-          // //     await showDialog(
-          // //       context: context,
-          // //       builder: (ctx) => AlertDialog(
-          // //         title: const Text('Raw /deliveries response'),
-          // //         content: SingleChildScrollView(child: SelectableText(raw)),
-          // //         actions: [
-          // //           TextButton(
-          // //             onPressed: () {
-          // //               Navigator.pop(ctx);
-          // //             },
-          // //             child: const Text('Tutup'),
-          // //           ),
-          // //           TextButton(
-          // //             onPressed: () async {
-          // //               try {
-          // //                 await Clipboard.setData(ClipboardData(text: raw));
-          // //               } catch (_) {}
-          // //               Navigator.pop(ctx);
-          // //             },
-          // //             child: const Text('Copy'),
-          // //           ),
-          // //         ],
-          // //       ),
-          // //     );
-          // //   },
-          // //   icon: const Icon(Icons.bug_report_rounded),
-          // // ),
+          if (kDebugMode)
+            IconButton(
+              tooltip: 'Show raw /deliveries response',
+              onPressed: () async {
+                final api = ApiService(StorageService());
+                String raw = '';
+                try {
+                  raw = await api.getDeliveriesRaw();
+                } catch (e) {
+                  raw = 'Error fetching raw: ${e.toString()}';
+                }
+                if (!mounted) return;
+                await showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Raw /deliveries response'),
+                    content: SingleChildScrollView(child: SelectableText(raw)),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Tutup'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          try {
+                            await Clipboard.setData(ClipboardData(text: raw));
+                          } catch (_) {}
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('Copy'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.bug_report_rounded),
+            ),
           // // IconButton(
           // //   tooltip: 'Muat semua',
           // //   onPressed: () async {
@@ -703,7 +702,7 @@ class _HistoryCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: Ink(
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceVariant,
+          color: theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Padding(

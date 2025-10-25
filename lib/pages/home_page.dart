@@ -295,9 +295,9 @@ class _HomePageState extends State<HomePage> {
         // not in day
       } else {
         dDocs++;
-        if (isDone)
+        if (isDone) {
           dDone++;
-        else if (isIn)
+        } else if (isIn)
           dIn++;
       }
       if (createdJakarta.isBefore(weekStart) ||
@@ -305,9 +305,9 @@ class _HomePageState extends State<HomePage> {
         // not in week
       } else {
         wDocs++;
-        if (isDone)
+        if (isDone) {
           wDone++;
-        else if (isIn)
+        } else if (isIn)
           wIn++;
       }
       if (createdJakarta.isBefore(monthStart) ||
@@ -315,9 +315,9 @@ class _HomePageState extends State<HomePage> {
         // not in month
       } else {
         mDocs++;
-        if (isDone)
+        if (isDone) {
           mDone++;
-        else if (isIn)
+        } else if (isIn)
           mIn++;
       }
     }
@@ -811,7 +811,7 @@ class _DeliveryCard extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(

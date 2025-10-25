@@ -84,12 +84,35 @@ class _LoginPageState extends State<LoginPage>
     _passwordNode.unfocus();
 
     try {
-      // login() sekarang sudah robust: bisa handle response {data:{token,user}} ataupun {data:{email,name,token}}
+      // Try to login. Some backends may return unexpected shapes; treat
+      // a saved token as success even if /auth/me had issues.
       await api.login(email: email, password: password);
+      // If login didn't throw, prefer to navigate. Also defensively check
+      // that a token was stored; if so navigate to /home.
+      final token = await StorageService().getToken();
+      if (token != null && token.isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _errorText = null);
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+        return;
+      }
+      // If no token found, treat as an error.
+      setState(() => _errorText = 'Login gagal: token tidak ditemukan');
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed('/home');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login gagal: token tidak ditemukan')),
+      );
     } catch (e) {
       final msg = _prettyError(e);
+      // Defensive: if login process threw but a token exists, consider login
+      // successful (some backends may return non-200 for /auth/me).
+      final token = await StorageService().getToken();
+      if (token != null && token.isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _errorText = null);
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+        return;
+      }
       setState(() => _errorText = msg);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));

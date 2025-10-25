@@ -53,8 +53,9 @@ class ApiService {
         if (r.statusCode == 200) {
           dynamic body = r.data;
           if (body is String) body = jsonDecode(body);
-          if (body is Map)
+          if (body is Map) {
             return DashboardCounts.fromJson(Map<String, dynamic>.from(body));
+          }
           // sometimes payload is nested
           if (body is Map && body['data'] is Map) {
             return DashboardCounts.fromJson(
@@ -250,8 +251,11 @@ class ApiService {
     );
 
     if (r.statusCode != 200) {
+      // Include the requested URI in the error to make 404/endpoint issues
+      // easier to diagnose when the app is run on emulator/device.
+      final uri = r.requestOptions.uri;
       throw Exception(
-        'Gagal memuat data (${r.statusCode}): ${r.statusMessage}',
+        'Gagal memuat data (${r.statusCode} ${r.statusMessage}) dari $uri',
       );
     }
 
@@ -273,7 +277,8 @@ class ApiService {
     }
 
     if (items == null) {
-      throw Exception('Format data tidak dikenali: $body');
+      final uri = r.requestOptions.uri;
+      throw Exception('Format data tidak dikenali dari $uri: $body');
     }
 
     final host = baseUrl.replaceFirst(RegExp(r'/api\/?$'), '');
@@ -337,9 +342,9 @@ class ApiService {
       if (body is String) body = jsonDecode(body);
 
       List<dynamic>? items;
-      if (body is Map && body['data'] is List)
+      if (body is Map && body['data'] is List) {
         items = body['data'];
-      else if (body is List)
+      } else if (body is List)
         items = body;
 
       if (items == null || items.isEmpty) break;

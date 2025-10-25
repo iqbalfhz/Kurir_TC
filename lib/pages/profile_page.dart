@@ -88,8 +88,9 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           FilledButton(
             onPressed: () {
-              if (formKey.currentState?.validate() ?? false)
+              if (formKey.currentState?.validate() ?? false) {
                 Navigator.pop(ctx, true);
+              }
             },
             child: const Text('Simpan'),
           ),
@@ -386,7 +387,6 @@ class _StatTile extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
-    super.key,
   });
   final IconData icon;
   final String label;
@@ -397,7 +397,7 @@ class _StatTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -437,7 +437,7 @@ class _StatTile extends StatelessWidget {
 }
 
 class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.children, super.key});
+  const _SectionCard({required this.title, required this.children});
   final String title;
   final List<Widget> children;
 

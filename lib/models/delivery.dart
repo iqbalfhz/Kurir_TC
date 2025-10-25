@@ -22,9 +22,9 @@ class Delivery {
   factory Delivery.fromJson(Map<String, dynamic> j) {
     // Accept both 'note' and 'notes' from backend
     String? noteValue;
-    if (j['note'] != null)
+    if (j['note'] != null) {
       noteValue = '${j['note']}';
-    else if (j['notes'] != null)
+    } else if (j['notes'] != null)
       noteValue = '${j['notes']}';
 
     // Normalize photo_url if present and relative
