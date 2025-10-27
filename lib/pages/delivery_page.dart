@@ -27,6 +27,7 @@ class _DeliveryPageState extends State<DeliveryPage> {
   final _recipientCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
+  final _deliveredByCtrl = TextEditingController();
   final ImagePicker _picker = ImagePicker();
 
   // Foto dokumen
@@ -41,6 +42,7 @@ class _DeliveryPageState extends State<DeliveryPage> {
     _recipientCtrl.dispose();
     _addressCtrl.dispose();
     _noteCtrl.dispose();
+    _deliveredByCtrl.dispose();
     super.dispose();
   }
 
@@ -227,6 +229,9 @@ class _DeliveryPageState extends State<DeliveryPage> {
         note: _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
         photoBytes: _photoUploadBytes, // kirim hasil kompres jika ada
         photoFilename: 'doc.jpg', // atau 'doc.webp' bila preferWebp
+        deliveredByName: _deliveredByCtrl.text.trim().isEmpty
+            ? null
+            : _deliveredByCtrl.text.trim(),
         // Do not send status here; let the backend apply its default value.
       );
 
@@ -236,14 +241,41 @@ class _DeliveryPageState extends State<DeliveryPage> {
         // ignore: avoid_print
         print('createDelivery response status: ${delivery.status}');
       } catch (_) {}
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Pengiriman dibuat (#${delivery.id}) — status: ${delivery.status}',
+
+      // Show a friendly success dialog (simple message) and allow the user
+      // to close or go to the history screen. The dialog buttons handle
+      // popping the dialog and the page when appropriate.
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.check_circle, color: Colors.green),
+              SizedBox(width: 8),
+              Text('Berhasil'),
+            ],
           ),
+          content: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              'Terima kasih — dokumen berhasil dikirim.',
+              style: TextStyle(fontSize: 15),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context, true);
+              },
+              child: const Text('Tutup'),
+            ),
+          ],
         ),
       );
-      Navigator.pop(context, true); // biar Home bisa refresh
+
+      // (Dialog actions already close the page when the user chooses to)
     } catch (e) {
       if (!mounted) return;
       String msg;
@@ -290,12 +322,24 @@ class _DeliveryPageState extends State<DeliveryPage> {
                 readOnly: true,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
-                  labelText: 'Nama Pengirim',
+                  labelText: 'Messenger',
                   hintText: 'Contoh: Iqbal Fahrozi',
                   prefixIcon: Icon(Icons.person_outline),
                   suffixText: 'Otomatis',
                 ),
                 validator: _required,
+              ),
+              const SizedBox(height: 12),
+
+              // Nama yang akan menerima / delivered_by_name
+              TextFormField(
+                controller: _deliveredByCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Pengirim',
+                  hintText: 'Nama orang pengirim',
+                  prefixIcon: Icon(Icons.person_2_outlined),
+                ),
               ),
               const SizedBox(height: 12),
 
@@ -339,6 +383,7 @@ class _DeliveryPageState extends State<DeliveryPage> {
                   prefixIcon: Icon(Icons.sticky_note_2_outlined),
                 ),
               ),
+              const SizedBox(height: 12),
             ],
           ),
         ),

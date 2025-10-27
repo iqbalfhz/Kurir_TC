@@ -69,7 +69,8 @@ class _HistoryPageState extends State<HistoryPage> {
     developer.log('Loading deliveries', name: 'HistoryPage');
     try {
       final api = ApiService(StorageService());
-      final list = await api.getDeliveries(page: 1);
+      // Only load deliveries for the currently authenticated user
+      final list = await api.getDeliveries(onlyMine: true, page: 1);
       final mapped = list.map((m.Delivery d) {
         return _DeliveryHistoryItem(
           id: d.id,
@@ -78,6 +79,7 @@ class _HistoryPageState extends State<HistoryPage> {
           address: d.address,
           note: d.note,
           photoUrl: d.photoUrl,
+          deliveredByName: d.deliveredByName,
           rawStatus: d.status,
           status: _mapStatus(d.status),
           time: d.createdAt ?? DateTime.now(),
@@ -128,7 +130,8 @@ class _HistoryPageState extends State<HistoryPage> {
     _isLoadingMore = true;
     try {
       final api = ApiService(StorageService());
-      final list = await api.getDeliveries(page: _page);
+      // Only load deliveries for the currently authenticated user
+      final list = await api.getDeliveries(onlyMine: true, page: _page);
       final mapped = list.map((m.Delivery d) {
         return _DeliveryHistoryItem(
           id: d.id,
@@ -137,6 +140,7 @@ class _HistoryPageState extends State<HistoryPage> {
           address: d.address,
           note: d.note,
           photoUrl: d.photoUrl,
+          deliveredByName: d.deliveredByName,
           rawStatus: d.status,
           status: _mapStatus(d.status),
           time: d.createdAt ?? DateTime.now(),
@@ -236,7 +240,8 @@ class _HistoryPageState extends State<HistoryPage> {
                 final api = ApiService(StorageService());
                 String raw = '';
                 try {
-                  raw = await api.getDeliveriesRaw();
+                  // Fetch raw response for only the authenticated user's deliveries
+                  raw = await api.getDeliveriesRaw(onlyMine: true);
                 } catch (e) {
                   raw = 'Error fetching raw: ${e.toString()}';
                 }
@@ -419,6 +424,11 @@ class _HistoryPageState extends State<HistoryPage> {
                                       padding: const EdgeInsets.only(bottom: 8),
                                       child: Image.network(it.photoUrl!),
                                     ),
+                                  // Always show delivered_by_name under the receiver (title)
+                                  Text(
+                                    'Nama Penyerah: ${it.deliveredByName?.isNotEmpty == true ? it.deliveredByName : 'Belum diisi'}',
+                                  ),
+                                  const SizedBox(height: 6),
                                   Text('Pengirim: ${it.senderName}'),
                                   const SizedBox(height: 6),
                                   Text('Alamat: ${it.address}'),
@@ -550,6 +560,7 @@ class _DeliveryHistoryItem {
   final String address;
   final String? note;
   final String? photoUrl;
+  final String? deliveredByName;
   final String rawStatus;
   final DeliveryStatus status;
   final DateTime time;
@@ -560,6 +571,7 @@ class _DeliveryHistoryItem {
     required this.address,
     this.note,
     this.photoUrl,
+    this.deliveredByName,
     required this.rawStatus,
     required this.status,
     required this.time,
@@ -773,11 +785,6 @@ class _HistoryCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _fmtTime(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.hour)}:${two(d.minute)}';
   }
 }
 

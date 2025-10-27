@@ -201,24 +201,24 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
                     const Divider(height: 0),
-                    ListTile(
-                      leading: const Icon(Icons.notifications_active_outlined),
-                      title: const Text('Notifikasi'),
-                      subtitle: const Text(
-                        'Ringkasan harian & status pengiriman',
-                      ),
-                      trailing: Switch(
-                        value: true,
-                        onChanged: (v) =>
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Preferensi notifikasi diperbarui (MVP).',
-                                ),
-                              ),
-                            ),
-                      ),
-                    ),
+                    // ListTile(
+                    //   leading: const Icon(Icons.notifications_active_outlined),
+                    //   title: const Text('Notifikasi'),
+                    //   subtitle: const Text(
+                    //     'Ringkasan harian & status pengiriman',
+                    //   ),
+                    //   trailing: Switch(
+                    //     value: true,
+                    //     onChanged: (v) =>
+                    //         ScaffoldMessenger.of(context).showSnackBar(
+                    //           const SnackBar(
+                    //             content: Text(
+                    //               'Preferensi notifikasi diperbarui (MVP).',
+                    //             ),
+                    //           ),
+                    //         ),
+                    //   ),
+                    // ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -240,12 +240,12 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout_rounded),
-                  label: const Text('Keluar Akun'),
-                ),
+                // const SizedBox(height: 24),
+                // FilledButton.icon(
+                //   onPressed: _logout,
+                //   icon: const Icon(Icons.logout_rounded),
+                //   label: const Text('Keluar Akun'),
+                // ),
               ],
             );
           },

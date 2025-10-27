@@ -151,7 +151,12 @@ class _HomePageState extends State<HomePage> {
     if (_isLoadingMore) return;
     _isLoadingMore = true;
     try {
-      final list = await _api.getDeliveries(perPage: 50, page: page);
+      // Load only deliveries belonging to the authenticated user
+      final list = await _api.getDeliveries(
+        onlyMine: true,
+        perPage: 50,
+        page: page,
+      );
       if (!mounted) return;
 
       if (replace) {
@@ -228,6 +233,7 @@ class _HomePageState extends State<HomePage> {
             d.status,
             id: d.id,
             photoUrl: d.photoUrl,
+            deliveredByName: d.deliveredByName,
           ),
         )
         .where(
@@ -485,7 +491,7 @@ class _HomePageState extends State<HomePage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Detail'),
+        title: const Text('Detail'),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -496,10 +502,15 @@ class _HomePageState extends State<HomePage> {
                   child: Image.network(item.photoUrl!),
                 ),
               Text('Penerima: ${item.title}'),
+              const SizedBox(height: 6),
+              Text(
+                'Nama Pengirim: ${item.deliveredByName?.isNotEmpty == true}',
+              ),
               const SizedBox(height: 8),
               Text('Alamat: ${item.address}'),
               const SizedBox(height: 8),
               Text('Status: ${item.rawStatus ?? item.status.toString()}'),
+              const SizedBox(height: 12),
             ],
           ),
         ),
@@ -902,6 +913,7 @@ class _DeliveryItem {
   final String? rawStatus; // original status string from backend
   final int? id;
   final String? photoUrl;
+  final String? deliveredByName;
   const _DeliveryItem(
     this.title,
     this.address,
@@ -909,6 +921,7 @@ class _DeliveryItem {
     this.rawStatus, {
     this.id,
     this.photoUrl,
+    this.deliveredByName,
   });
 }
 

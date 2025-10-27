@@ -6,6 +6,7 @@ class Delivery {
   final String? note;
   final String status; // "assigned" | "in_transit" | "done" (sesuaikan BE)
   final String? photoUrl;
+  final String? deliveredByName;
   final DateTime? createdAt;
 
   Delivery({
@@ -16,6 +17,7 @@ class Delivery {
     this.note,
     required this.status,
     this.photoUrl,
+    this.deliveredByName,
     this.createdAt,
   });
 
@@ -44,6 +46,9 @@ class Delivery {
       note: noteValue,
       status: '${j['status'] ?? 'in_transit'}',
       photoUrl: photo,
+      deliveredByName: j['delivered_by_name'] != null
+          ? '${j['delivered_by_name']}'
+          : (j['delivered_by'] != null ? '${j['delivered_by']}' : null),
       createdAt: j['created_at'] != null
           ? DateTime.tryParse(j['created_at'].toString())
           : null,

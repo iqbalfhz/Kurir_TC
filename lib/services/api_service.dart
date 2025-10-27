@@ -152,6 +152,7 @@ class ApiService {
     Uint8List? photoBytes,
     String photoFilename = 'doc.jpg',
     String? initialStatus,
+    String? deliveredByName,
   }) async {
     final form = FormData();
 
@@ -164,6 +165,9 @@ class ApiService {
     }
     if (note != null && note.trim().isNotEmpty) {
       form.fields.add(MapEntry('note', note.trim()));
+    }
+    if (deliveredByName != null && deliveredByName.trim().isNotEmpty) {
+      form.fields.add(MapEntry('delivered_by_name', deliveredByName.trim()));
     }
     if (photoBytes != null && photoBytes.isNotEmpty) {
       form.files.add(
@@ -214,6 +218,24 @@ class ApiService {
 
     final data = r.data is String ? jsonDecode(r.data) : r.data;
     return Delivery.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  /// Update a delivery (partial): currently supports updating delivered_by_name and status
+  Future<void> updateDelivery({
+    required int id,
+    String? deliveredByName,
+    String? status,
+  }) async {
+    final data = <String, dynamic>{};
+    if (deliveredByName != null) data['delivered_by_name'] = deliveredByName;
+    if (status != null) data['status'] = status;
+
+    final r = await _dio.patch('/deliveries/$id', data: data);
+    if (r.statusCode != 200) {
+      throw Exception(
+        'Gagal memperbarui pengiriman (${r.statusCode}): ${r.statusMessage}',
+      );
+    }
   }
 
   String _formatValidation(dynamic body) {
